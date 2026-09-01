@@ -1,5 +1,5 @@
-STMicroelectronics STM32 boards (``netduino2``, ``netduinoplus2``, ``olimex-stm32-h405``, ``stm32vldiscovery``)
-===============================================================================================================
+STMicroelectronics STM32 boards (``netduino2``, ``netduinoplus2``, ``olimex-stm32-h405``, ``stm32h743-eval``, ``stm32vldiscovery``)
+===================================================================================================================================
 
 The `STM32`_ chips are a family of 32-bit Arm-based microcontrollers by
 STMicroelectronics.
@@ -24,12 +24,19 @@ The following machines are based on this Arm Cortex-M4F chip :
 - ``olimex-stm32-h405`` Olimex STM32 H405 board with STM32F405RGT6 microcontroller
 - ``b-l475e-iot01a``     :doc:`B-L475E-IOT01A IoT Node </system/arm/b-l475e-iot01a>` board with STM32L475VG microcontroller
 
+The STM32H7 series is based on an Arm Cortex-M7 core. Only a minimal,
+synthetic bring-up target is provided; it is not a model of any specific
+ST reference board, and only a single USART is implemented, with all other
+peripherals present as unimplemented-access stubs:
+
+- ``stm32h743-eval``    Minimal STM32H7 bring-up target with an STM32H743xI microcontroller
+
 There are many other STM32 series that are currently not supported by QEMU.
 
 Supported devices
 -----------------
 
- * Arm Cortex-M3, Cortex-M4F
+ * Arm Cortex-M3, Cortex-M4F, Cortex-M7
  * Analog to Digital Converter (ADC)
  * EXTI interrupt
  * Serial ports (USART)

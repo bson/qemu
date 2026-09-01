@@ -1107,6 +1107,14 @@ F: hw/gpio/stm32l4x5_gpio.c
 F: include/hw/*/stm32l4x5_*.h
 F: tests/qtest/stm32l4x5*
 
+STM32H7 SoC Family
+M: Jan Brittenson <bson@rockgarden.net>
+L: qemu-arm@nongnu.org
+S: Maintained
+F: hw/arm/stm32h7_soc.c
+F: hw/arm/stm32h743-eval.c
+F: include/hw/arm/stm32h7_soc.h
+
 STM32VLDISCOVERY
 M: Alexandre Iooss <erdnaxe@crans.org>
 L: qemu-arm@nongnu.org
