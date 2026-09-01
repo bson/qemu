@@ -1518,6 +1518,31 @@ static uint32_t nvic_readl(NVICState *s, uint32_t offset, MemTxAttrs attrs)
             return 0;
         }
         return cpu->env.v7m.sfar;
+    case 0xdf0: /* DHCSR */
+        /*
+         * We don't model halting debug (no external probe/SWD is
+         * emulated), so the only status bits we report are the fixed
+         * ones: no register-transfer pending (S_REGRDY), never halted
+         * (S_HALT), never in lockup (S_LOCKUP). The control bits
+         * (C_DEBUGEN/C_HALT/C_STEP/C_MASKINTS) are simply readback of
+         * whatever was last written to them; they have no functional
+         * effect.
+         */
+        return (s->dhcsr & (R_V7M_DHCSR_C_DEBUGEN_MASK |
+                            R_V7M_DHCSR_C_HALT_MASK |
+                            R_V7M_DHCSR_C_STEP_MASK |
+                            R_V7M_DHCSR_C_MASKINTS_MASK)) |
+               R_V7M_DHCSR_S_REGRDY_MASK;
+    case 0xdf4: /* DCRSR */
+        /* Write-only */
+        return 0;
+    case 0xdf8: /* DCRDR */
+        return s->dcrdr;
+    case 0xdfc: /* DEMCR */
+        /* MON_PEND reflects live exception-pending state, not storage */
+        return s->demcr |
+               (s->vectors[ARMV7M_EXCP_DEBUG].pending ?
+                R_V7M_DEMCR_MON_PEND_MASK : 0);
     case 0xf04: /* RFSR */
         if (!cpu_isar_feature(aa32_ras, cpu)) {
             goto bad_offset;
@@ -2083,6 +2108,53 @@ static void nvic_writel(NVICState *s, uint32_t offset, uint32_t value,
         }
         cpu->env.v7m.sfsr = value;
         break;
+    case 0xdf0: /* DHCSR */
+        /*
+         * Writes only take effect if the debug key is present in the
+         * upper halfword; we don't model halting debug, so the control
+         * bits (C_DEBUGEN/C_HALT/C_STEP/C_MASKINTS) have no functional
+         * effect but are still stored so a read gives back what was
+         * written, as real hardware does.
+         */
+        if ((value & R_V7M_DHCSR_DBGKEY_MASK) ==
+            (0xa05f << R_V7M_DHCSR_DBGKEY_SHIFT)) {
+            s->dhcsr = value & (R_V7M_DHCSR_C_DEBUGEN_MASK |
+                                R_V7M_DHCSR_C_HALT_MASK |
+                                R_V7M_DHCSR_C_STEP_MASK |
+                                R_V7M_DHCSR_C_MASKINTS_MASK);
+        }
+        break;
+    case 0xdf4: /* DCRSR */
+        /*
+         * Register-transfer side of halting debug, which we don't model
+         * (no external probe is emulated); log and ignore.
+         */
+        qemu_log_mask(LOG_UNIMP, "NVIC: DCRSR write ignored (no halting "
+                      "debug support)\n");
+        break;
+    case 0xdf8: /* DCRDR */
+        s->dcrdr = value;
+        break;
+    case 0xdfc: /* DEMCR */
+        /* MON_PEND is not stored: read back live from vectors[], below */
+        s->demcr = value & (R_V7M_DEMCR_VC_CORERESET_MASK |
+                            R_V7M_DEMCR_VC_MMERR_MASK |
+                            R_V7M_DEMCR_VC_NOCPERR_MASK |
+                            R_V7M_DEMCR_VC_CHKERR_MASK |
+                            R_V7M_DEMCR_VC_STATERR_MASK |
+                            R_V7M_DEMCR_VC_BUSERR_MASK |
+                            R_V7M_DEMCR_VC_INTERR_MASK |
+                            R_V7M_DEMCR_VC_HARDERR_MASK |
+                            R_V7M_DEMCR_MON_EN_MASK |
+                            R_V7M_DEMCR_MON_STEP_MASK |
+                            R_V7M_DEMCR_MON_REQ_MASK |
+                            R_V7M_DEMCR_TRCENA_MASK);
+        s->vectors[ARMV7M_EXCP_DEBUG].enabled =
+            !!(s->demcr & R_V7M_DEMCR_MON_EN_MASK);
+        if (value & R_V7M_DEMCR_MON_PEND_MASK) {
+            armv7m_nvic_set_pending(s, ARMV7M_EXCP_DEBUG, false);
+        }
+        break;
     case 0xf00: /* Software Triggered Interrupt Register */
     {
         int excnum = (value & 0x1ff) + NVIC_FIRST_IRQ;
@@ -2598,13 +2670,16 @@ static const VMStateDescription vmstate_nvic_security = {
 
 static const VMStateDescription vmstate_nvic = {
     .name = "armv7m_nvic",
-    .version_id = 4,
-    .minimum_version_id = 4,
+    .version_id = 5,
+    .minimum_version_id = 5,
     .post_load = &nvic_post_load,
     .fields = (const VMStateField[]) {
         VMSTATE_STRUCT_ARRAY(vectors, NVICState, NVIC_MAX_VECTORS, 1,
                              vmstate_VecInfo, VecInfo),
         VMSTATE_UINT32(prigroup[M_REG_NS], NVICState),
+        VMSTATE_UINT32(dhcsr, NVICState),
+        VMSTATE_UINT32(dcrdr, NVICState),
+        VMSTATE_UINT32(demcr, NVICState),
         VMSTATE_END_OF_LIST()
     },
     .subsections = (const VMStateDescription * const []) {
@@ -2643,6 +2718,9 @@ static void armv7m_nvic_reset(DeviceState *dev)
 
     /* DebugMonitor is enabled via DEMCR.MON_EN */
     s->vectors[ARMV7M_EXCP_DEBUG].enabled = 0;
+    s->demcr = 0;
+    s->dhcsr = 0;
+    s->dcrdr = 0;
 
     resetprio = arm_feature(&s->cpu->env, ARM_FEATURE_V8) ? -4 : -3;
     s->vectors[ARMV7M_EXCP_RESET].prio = resetprio;

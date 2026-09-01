@@ -78,6 +78,15 @@ struct NVICState {
 
     MemoryRegion sysregmem;
 
+    /*
+     * Debug registers (DHCSR/DCRDR/DEMCR). DCRSR is a write-only
+     * register-select trigger for the halting-debug core-register
+     * transfer mechanism and needs no persistent storage of its own.
+     */
+    uint32_t dhcsr;
+    uint32_t dcrdr;
+    uint32_t demcr;
+
     uint32_t num_irq;
     qemu_irq excpout;
     qemu_irq sysresetreq;
