@@ -30,11 +30,14 @@ REG32(DWT_FUNCTION0, 0x28)
 
 #define DWT_STRIDE 0x10
 
-/* FUNCTION encodings we implement: basic address-only watchpoints */
+/*
+ * FUNCTION encodings we implement: basic address-only watchpoints.
+ * Per the ARMv7-M ARM (DDI0403E.d, Table C1-13): 5=read, 6=write, 7=RW.
+ */
 #define DWT_FUNC_DISABLED 0x0
-#define DWT_FUNC_WATCH_READ 0x4
-#define DWT_FUNC_WATCH_WRITE 0x5
-#define DWT_FUNC_WATCH_RW 0x6
+#define DWT_FUNC_WATCH_READ 0x5
+#define DWT_FUNC_WATCH_WRITE 0x6
+#define DWT_FUNC_WATCH_RW 0x7
 
 static void dwt_update_wp(ARMv7mDWTState *s, unsigned n)
 {
