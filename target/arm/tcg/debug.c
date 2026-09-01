@@ -510,6 +510,10 @@ void HELPER(exception_bkpt_insn)(CPUARMState *env, uint32_t syndrome)
     int debug_el = arm_debug_target_el(env);
     int cur_el = arm_current_el(env);
 
+    if (arm_feature(env, ARM_FEATURE_M)) {
+        env->v7m.dfsr |= R_V7M_DFSR_BKPT_MASK;
+    }
+
     /* FSR will only be used if the debug target EL is AArch32. */
     env->exception.fsr = arm_debug_exception_fsr(env);
     /*

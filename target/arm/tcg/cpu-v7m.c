@@ -246,7 +246,7 @@ static const TCGCPUOps arm_v7m_tcg_ops = {
     .translate_code = arm_translate_code,
     .get_tb_cpu_state = arm_get_tb_cpu_state,
     .synchronize_from_tb = arm_cpu_synchronize_from_tb,
-    .debug_excp_handler = arm_debug_excp_handler,
+    .debug_excp_handler = armv7m_debug_excp_handler,
     .restore_state_to_opc = arm_restore_state_to_opc,
     .mmu_index = arm_cpu_mmu_index,
 
@@ -263,8 +263,8 @@ static const TCGCPUOps arm_v7m_tcg_ops = {
     .do_transaction_failed = arm_cpu_do_transaction_failed,
     .do_unaligned_access = arm_cpu_do_unaligned_access,
     .adjust_watchpoint_address = arm_adjust_watchpoint_address,
-    .debug_check_watchpoint = arm_debug_check_watchpoint,
-    .debug_check_breakpoint = arm_debug_check_breakpoint,
+    .debug_check_watchpoint = armv7m_debug_check_watchpoint,
+    .debug_check_breakpoint = armv7m_debug_check_breakpoint,
 #endif /* !CONFIG_USER_ONLY */
 };
 

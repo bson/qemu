@@ -13,6 +13,8 @@
 #include "hw/core/sysbus.h"
 #include "hw/intc/armv7m_nvic.h"
 #include "hw/misc/armv7m_ras.h"
+#include "hw/misc/armv7m_fpb.h"
+#include "hw/misc/armv7m_dwt.h"
 #include "target/arm/tcg/idau.h"
 #include "qom/object.h"
 #include "hw/core/clock.h"
@@ -59,6 +61,13 @@ OBJECT_DECLARE_SIMPLE_TYPE(ARMv7MState, ARMV7M)
  * + Property "mpu-s-regions": number of Secure MPU regions (default is
  *   whatever the default for the CPU is; must currently be set to the same
  *   value as mpu-ns-regions if the CPU implements the Security Extension)
+ * + Property "has-fpb": instantiate the Flash Patch and Breakpoint unit
+ *   (architectural hardware breakpoints, guest-visible via the
+ *   DebugMonitor exception -- see hw/misc/armv7m_fpb.c). Opt-in and
+ *   defaults to false so existing boards are unaffected.
+ * + Property "has-dwt": instantiate the Data Watchpoint and Trace unit
+ *   (architectural hardware watchpoints, same DebugMonitor delivery --
+ *   see hw/misc/armv7m_dwt.c). Opt-in, defaults to false.
  * + Clock input "refclk" is the external reference clock for the systick timers
  * + Clock input "cpuclk" is the main CPU clock
  */
@@ -70,6 +79,8 @@ struct ARMv7MState {
     BitBandState bitband[ARMV7M_NUM_BITBANDS];
     ARMCPU *cpu;
     ARMv7MRAS ras;
+    ARMv7mFPBState fpb;
+    ARMv7mDWTState dwt;
     SysTickState systick[M_REG_NUM_BANKS];
 
     /* MemoryRegion we pass to the CPU, with our devices layered on
@@ -108,6 +119,8 @@ struct ARMv7MState {
     bool start_powered_off;
     bool vfp;
     bool dsp;
+    bool has_fpb;
+    bool has_dwt;
 };
 
 #endif

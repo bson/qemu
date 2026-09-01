@@ -702,6 +702,21 @@ vaddr arm_adjust_watchpoint_address(CPUState *cs, vaddr addr, int len);
 /* Callback function for when a watchpoint or breakpoint triggers. */
 void arm_debug_excp_handler(CPUState *cs);
 
+/*
+ * M-profile equivalents of the above three. Unlike the A/R-profile
+ * versions, these have no CP15 (DBGBCR/DBGBVR/DBGWCR/DBGWVR) state to
+ * consult -- M-profile "Monitor mode debugging" hardware breakpoints
+ * and watchpoints are instead programmed via the FPB and DWT
+ * MMIO register blocks (hw/misc/armv7m_fpb.c, hw/misc/armv7m_dwt.c),
+ * which call cpu_breakpoint_insert()/cpu_watchpoint_insert() directly.
+ * A match is delivered to the guest as a DebugMonitor exception
+ * (ARMv7M_EXCP_DEBUG), gated on DEMCR.MON_EN, rather than as an
+ * A-profile-style abort.
+ */
+bool armv7m_debug_check_breakpoint(CPUState *cs);
+bool armv7m_debug_check_watchpoint(CPUState *cs, CPUWatchpoint *wp);
+void armv7m_debug_excp_handler(CPUState *cs);
+
 #if defined(CONFIG_USER_ONLY) || !defined(CONFIG_TCG)
 static inline bool arm_is_psci_call(ARMCPU *cpu, int excp_type)
 {

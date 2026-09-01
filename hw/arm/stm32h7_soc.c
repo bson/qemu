@@ -143,6 +143,15 @@ static void stm32h7_soc_realize(DeviceState *dev_soc, Error **errp)
      * there instead of from the ITCM, which occupies address 0.
      */
     qdev_prop_set_uint32(armv7m, "init-nsvtor", FLASH_BASE_ADDRESS);
+    /*
+     * Real STM32H7 silicon implements the Cortex-M7's Flash Patch and
+     * Breakpoint (FPB) and Data Watchpoint and Trace (DWT) units for
+     * architectural "Monitor mode debugging" -- expose them so guest
+     * debug-monitor firmware can use real hardware breakpoints and
+     * watchpoints, not just QEMU's own external gdbstub.
+     */
+    qdev_prop_set_bit(armv7m, "has-fpb", true);
+    qdev_prop_set_bit(armv7m, "has-dwt", true);
     qdev_connect_clock_in(armv7m, "cpuclk", s->sysclk);
     qdev_connect_clock_in(armv7m, "refclk", s->sysclk);
     object_property_set_link(OBJECT(&s->armv7m), "memory",

@@ -1379,6 +1379,12 @@ static void do_v7m_exception_exit(ARMCPU *cpu)
     bool return_to_secure;
     bool ftype;
     bool restore_s16_s31 = false;
+    /*
+     * Captured before xpsr_write() overwrites v7m.exception (which
+     * backs IPSR) with the post-return value; needed below to detect
+     * a DEMCR.MON_STEP-armed return from DebugMonitor.
+     */
+    int old_exception = env->v7m.exception;
 
     /*
      * If we're not in Handler mode then jumps to magic exception-exit
@@ -1909,6 +1915,22 @@ static void do_v7m_exception_exit(ARMCPU *cpu)
     arm_clear_exclusive(env);
     arm_rebuild_hflags(env);
 
+    /*
+     * DEMCR.MON_STEP single-stepping: if we are returning from the
+     * DebugMonitor exception and MON_EN/MON_STEP are both set, arm a
+     * single-instruction step. Completion is caught by
+     * armv7m_debug_excp_handler() (target/arm/tcg/m_helper.c), which
+     * redirects it back into DebugMonitor instead of letting it reach
+     * gdbstub, since this step was armed by the guest, not by an
+     * external debugger.
+     */
+    if (old_exception == ARMV7M_EXCP_DEBUG &&
+        (env->nvic->demcr & R_V7M_DEMCR_MON_EN_MASK) &&
+        (env->nvic->demcr & R_V7M_DEMCR_MON_STEP_MASK)) {
+        env->v7m.mon_stepping = true;
+        cpu_single_step(CPU(cpu), SSTEP_ENABLE);
+    }
+
     /* Exception return sets the event register (ARM ARM R_BPBR) */
     env->event_register = true;
     qemu_log_mask(CPU_LOG_INT, "...successful exception return\n");
@@ -2204,6 +2226,76 @@ gen_invep:
     qemu_log_mask(CPU_LOG_INT,
                   "...really SecureFault with SFSR.INVEP\n");
     return false;
+}
+
+/*
+ * M-profile "Monitor mode debugging" hardware breakpoint/watchpoint
+ * support (FPB/DWT, see hw/misc/armv7m_fpb.c and hw/misc/armv7m_dwt.c).
+ * These are the M-profile equivalents of arm_debug_check_breakpoint()/
+ * arm_debug_check_watchpoint()/arm_debug_excp_handler() in
+ * target/arm/tcg/debug.c, which are not usable here: those gate on
+ * CP15 MDSCR_EL1/DBGBCR/DBGWCR state that M-profile CPUs never
+ * populate (M-profile has no coprocessor interface at all), so for
+ * an M-profile CPU they are always inert. cpu-v7m.c points this
+ * profile's TCGCPUOps at these functions instead.
+ */
+bool armv7m_debug_check_breakpoint(CPUState *cs)
+{
+    ARMCPU *cpu = ARM_CPU(cs);
+    CPUARMState *env = &cpu->env;
+
+    /* FPB breakpoints are only live (guest-visible) while MON_EN is set */
+    return env->nvic->demcr & R_V7M_DEMCR_MON_EN_MASK;
+}
+
+bool armv7m_debug_check_watchpoint(CPUState *cs, CPUWatchpoint *wp)
+{
+    ARMCPU *cpu = ARM_CPU(cs);
+    CPUARMState *env = &cpu->env;
+
+    return (wp->flags & BP_CPU) &&
+        (env->nvic->demcr & R_V7M_DEMCR_MON_EN_MASK);
+}
+
+void armv7m_debug_excp_handler(CPUState *cs)
+{
+    ARMCPU *cpu = ARM_CPU(cs);
+    CPUARMState *env = &cpu->env;
+    CPUWatchpoint *wp_hit = cs->watchpoint_hit;
+
+    if (env->v7m.mon_stepping) {
+        /*
+         * This EXCP_DEBUG completes a DEMCR.MON_STEP single step we
+         * armed on return from a previous DebugMonitor exception, not
+         * an external gdbstub step -- redirect it to DebugMonitor too.
+         */
+        env->v7m.mon_stepping = false;
+        cpu_single_step(cs, 0);
+        env->v7m.dfsr |= R_V7M_DFSR_HALTED_MASK;
+        raise_exception(env, EXCP_BKPT, syn_breakpoint(0), 1);
+    }
+
+    if (wp_hit) {
+        if (wp_hit->flags & BP_CPU) {
+            cs->watchpoint_hit = NULL;
+            env->v7m.dfsr |= R_V7M_DFSR_DWTTRAP_MASK;
+            raise_exception(env, EXCP_BKPT, syn_watchpoint(0, 0, 0), 1);
+        }
+        return;
+    }
+
+    if (cpu_breakpoint_test(cs, env->regs[15], BP_GDB) ||
+        !cpu_breakpoint_test(cs, env->regs[15], BP_CPU)) {
+        /*
+         * No FPB match here (or an external gdbstub bp also matches):
+         * leave EXCP_DEBUG in place so it bubbles up to gdbstub, same
+         * as A-profile's arm_debug_excp_handler().
+         */
+        return;
+    }
+
+    env->v7m.dfsr |= R_V7M_DFSR_BKPT_MASK;
+    raise_exception(env, EXCP_BKPT, syn_breakpoint(0), 1);
 }
 
 void arm_v7m_cpu_do_interrupt(CPUState *cs)

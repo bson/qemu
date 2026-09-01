@@ -527,6 +527,36 @@ static void armv7m_realize(DeviceState *dev, Error **errp)
                                             sysbus_mmio_get_region(sbd, 0), 1);
     }
 
+    /*
+     * Optionally instantiate the architectural hardware breakpoint
+     * (FPB) and watchpoint (DWT) units. These are guest-visible via
+     * DEMCR/the DebugMonitor exception, independent of and invisible
+     * to gdbstub; opt-in via has-fpb/has-dwt so existing boards that
+     * don't request them see no change in behaviour.
+     */
+    if (s->has_fpb) {
+        object_initialize_child(OBJECT(dev), "armv7m-fpb",
+                                &s->fpb, TYPE_ARMV7M_FPB);
+        s->fpb.cpu = s->cpu;
+        sbd = SYS_BUS_DEVICE(&s->fpb);
+        if (!sysbus_realize(sbd, errp)) {
+            return;
+        }
+        memory_region_add_subregion(&s->container, 0xe0002000,
+                                    sysbus_mmio_get_region(sbd, 0));
+    }
+    if (s->has_dwt) {
+        object_initialize_child(OBJECT(dev), "armv7m-dwt",
+                                &s->dwt, TYPE_ARMV7M_DWT);
+        s->dwt.cpu = s->cpu;
+        sbd = SYS_BUS_DEVICE(&s->dwt);
+        if (!sysbus_realize(sbd, errp)) {
+            return;
+        }
+        memory_region_add_subregion(&s->container, 0xe0001000,
+                                    sysbus_mmio_get_region(sbd, 0));
+    }
+
     for (i = 0; i < ARRAY_SIZE(s->bitband); i++) {
         if (s->enable_bitband) {
             Object *obj = OBJECT(&s->bitband[i]);
@@ -564,6 +594,8 @@ static const Property armv7m_properties[] = {
     DEFINE_PROP_BOOL("dsp", ARMv7MState, dsp, true),
     DEFINE_PROP_UINT32("mpu-ns-regions", ARMv7MState, mpu_ns_regions, UINT_MAX),
     DEFINE_PROP_UINT32("mpu-s-regions", ARMv7MState, mpu_s_regions, UINT_MAX),
+    DEFINE_PROP_BOOL("has-fpb", ARMv7MState, has_fpb, false),
+    DEFINE_PROP_BOOL("has-dwt", ARMv7MState, has_dwt, false),
 };
 
 static const VMStateDescription vmstate_armv7m = {
