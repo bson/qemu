@@ -30,6 +30,7 @@ test_arm_timeouts = {
 
 tests_arm_system_quick = [
   'migration',
+  'stm32h743_eval_gdbstub',
 ]
 
 tests_arm_system_thorough = [
