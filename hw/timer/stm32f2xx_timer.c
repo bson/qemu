@@ -189,6 +189,18 @@ static void stm32f2xx_timer_write(void *opaque, hwaddr offset,
     switch (offset) {
     case TIM_CR1:
         s->tim_cr1 = value;
+        /*
+         * Re-arm on enable: on real hardware CEN alone starts the
+         * counter/interrupt regardless of what order PSC/ARR were
+         * configured in. Without this, enabling CEN after ARR is
+         * already set does nothing until ARR (or PSC/CNT/EGR) is
+         * written again -- and if the single alarm scheduled by an
+         * earlier ARR write fires while CEN was still 0,
+         * stm32f2xx_timer_interrupt() leaves it unarmed permanently
+         * (it only reschedules from inside the "fired while enabled"
+         * branch), so the timer goes silently dead.
+         */
+        stm32f2xx_timer_set_alarm(s, now);
         return;
     case TIM_CR2:
         s->tim_cr2 = value;

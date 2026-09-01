@@ -56,11 +56,29 @@
 #define USART1_BASE_ADDRESS 0x40011000
 #define USART1_IRQ 37
 
+/*
+ * TIM2, at its real STM32H7 address/IRQ -- stable across the whole
+ * F2/F4/F7/H7 lineage sharing this general-purpose timer IP. The only
+ * real interrupt source on this SoC model besides USART1; lets guest
+ * firmware (and test harnesses) exercise a genuinely repeatedly-firing
+ * NVIC-dispatched interrupt instead of only a one-shot software pend.
+ */
+#define TIM2_BASE_ADDRESS 0x40000000
+#define TIM2_IRQ 28
+
+/*
+ * 1MHz: a clean, test-friendly choice, not a real derived clock -- this
+ * SoC model has no functional RCC clock tree to derive one from (same
+ * simplification SYSCLK's fixed 400MHz already makes).
+ */
+#define TIM2_CLOCK_FRQ 1000000
+
 static void stm32h7_soc_initfn(Object *obj)
 {
     Stm32h7SocState *s = STM32H7_SOC(obj);
 
     object_initialize_child(obj, "usart1", &s->usart1, TYPE_STM32L4X5_USART);
+    object_initialize_child(obj, "timer2", &s->timer2, TYPE_STM32F2XX_TIMER);
 }
 
 static void stm32h7_soc_realize(DeviceState *dev_soc, Error **errp)
@@ -170,6 +188,16 @@ static void stm32h7_soc_realize(DeviceState *dev_soc, Error **errp)
     }
     sysbus_mmio_map(busdev, 0, USART1_BASE_ADDRESS);
     sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(armv7m, USART1_IRQ));
+
+    /* TIM2: the only real interrupt source on this SoC besides USART1 */
+    dev = DEVICE(&s->timer2);
+    qdev_prop_set_uint64(dev, "clock-frequency", TIM2_CLOCK_FRQ);
+    busdev = SYS_BUS_DEVICE(dev);
+    if (!sysbus_realize(busdev, errp)) {
+        return;
+    }
+    sysbus_mmio_map(busdev, 0, TIM2_BASE_ADDRESS);
+    sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(armv7m, TIM2_IRQ));
 
     /* D3 domain */
     create_unimplemented_device("PWR",    0x58024800, 0x400);

@@ -22,6 +22,7 @@
 #include "system/memory.h"
 #include "hw/arm/armv7m.h"
 #include "hw/char/stm32l4x5_usart.h"
+#include "hw/timer/stm32f2xx_timer.h"
 #include "qom/object.h"
 
 #define TYPE_STM32H7_SOC "stm32h7-soc"
@@ -34,6 +35,7 @@ struct Stm32h7SocState {
     ARMv7MState armv7m;
 
     Stm32l4x5UsartBaseState usart1;
+    STM32F2XXTimerState timer2;
 
     Clock *sysclk;
 
