@@ -53,7 +53,15 @@ static void stm32h743_eval_machine_init(ObjectClass *oc, const void *data)
     mc->desc = "STM32H743 evaluation target (Cortex-M7)";
     mc->init = stm32h743_eval_init;
     mc->valid_cpu_types = valid_cpu_types;
-    mc->ignore_memory_transaction_failures = true;
+
+    /*
+     * No blanket ignore-failures safety net: every address real
+     * firmware can reasonably expect to always be present (the flash
+     * controller, DBGMCU, RCC, the factory UID) is backed by a real
+     * stub in stm32h7_soc_realize(), so a genuinely unmapped access --
+     * one nothing on real STM32H7 silicon would ever back either --
+     * correctly raises a BusFault, matching real hardware.
+     */
 
     /* RAM/flash are pre-allocated as part of the SoC instantiation */
     mc->default_ram_size = 0;

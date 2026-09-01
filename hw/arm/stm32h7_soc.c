@@ -195,6 +195,22 @@ static void stm32h7_soc_realize(DeviceState *dev_soc, Error **errp)
     create_unimplemented_device("USART6", 0x40011400, 0x400);
     create_unimplemented_device("UART7",  0x40007800, 0x400);
     create_unimplemented_device("UART8",  0x40007C00, 0x400);
+
+    /*
+     * Flash controller registers, debug MCU ID, and the factory unique
+     * ID: real, always-present peripherals on actual STM32H7 silicon,
+     * not board-specific wiring like the GPIO/UART stubs above. Guest
+     * firmware (e.g. gdbserver's own HAL) can reasonably read these
+     * unconditionally at boot expecting them to always be there, same
+     * as on real hardware -- stubbing them here (rather than leaving
+     * this range genuinely unmapped) lets the machine raise a real
+     * BusFault for addresses nothing on this SoC actually claims,
+     * instead of needing ignore_memory_transaction_failures as a
+     * blanket safety net.
+     */
+    create_unimplemented_device("FLASH",  0x52002000, 0x400);
+    create_unimplemented_device("DBGMCU", 0x5c001000, 0x400);
+    create_unimplemented_device("UID",    0x1ff1e800, 0x20);
 }
 
 static void stm32h7_soc_class_init(ObjectClass *klass, const void *data)
