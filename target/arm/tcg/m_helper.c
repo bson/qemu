@@ -18,6 +18,7 @@
 #include "exec/page-protection.h"
 #ifdef CONFIG_TCG
 #include "accel/tcg/cpu-ldst-common.h"
+#include "accel/tcg/cpu-loop.h"
 #include "semihosting/common-semi.h"
 #endif
 #if !defined(CONFIG_USER_ONLY)
@@ -1923,11 +1924,23 @@ static void do_v7m_exception_exit(ARMCPU *cpu)
      * redirects it back into DebugMonitor instead of letting it reach
      * gdbstub, since this step was armed by the guest, not by an
      * external debugger.
+     *
+     * accel/tcg/cpu-exec.c has more than one generic "an interrupt/
+     * exception was just processed -- if singlestepping is now on,
+     * raise EXCP_DEBUG immediately so gdb doesn't miss the next
+     * instruction" safety net, and this exception-exit IS itself being
+     * processed as one of those events: enabling cpu_single_step() here
+     * makes at least one of those safety nets fire before the CPU ever
+     * fetches the resumed context's first real instruction, catching
+     * the arming itself instead. armv7m_debug_excp_handler() detects
+     * and absorbs that spurious catch via mon_step_from_pc, so pc is
+     * recorded here for it to compare against.
      */
     if (old_exception == ARMV7M_EXCP_DEBUG &&
         (env->nvic->demcr & R_V7M_DEMCR_MON_EN_MASK) &&
         (env->nvic->demcr & R_V7M_DEMCR_MON_STEP_MASK)) {
         env->v7m.mon_stepping = true;
+        env->v7m.mon_step_from_pc = env->regs[15];
         cpu_single_step(CPU(cpu), SSTEP_ENABLE);
     }
 
@@ -2264,6 +2277,23 @@ void armv7m_debug_excp_handler(CPUState *cs)
     CPUWatchpoint *wp_hit = cs->watchpoint_hit;
 
     if (env->v7m.mon_stepping) {
+        if (env->regs[15] == env->v7m.mon_step_from_pc) {
+            /*
+             * Spurious: this is accel/tcg/cpu-exec.c's generic "an
+             * exception was just processed -- if singlestepping is now
+             * on, raise EXCP_DEBUG immediately so gdb doesn't miss the
+             * next instruction" safety net firing on the exception
+             * return that armed this very step (see the comment where
+             * mon_stepping is armed, in do_v7m_exception_exit()), before
+             * the CPU has fetched the resumed context's first real
+             * instruction. cpu_single_step is left enabled and
+             * mon_stepping left true; cpu_loop_exit() restarts the main
+             * TB-dispatch loop with nothing pending, so the next TB
+             * genuinely executes the resumed instruction before this
+             * handler is reached again.
+             */
+            cpu_loop_exit(cs);
+        }
         /*
          * This EXCP_DEBUG completes a DEMCR.MON_STEP single step we
          * armed on return from a previous DebugMonitor exception, not

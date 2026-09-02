@@ -640,6 +640,14 @@ typedef struct CPUArchState {
         uint32_t ltpsize;
         uint32_t vpr;
         bool mon_stepping; /* DEMCR.MON_STEP single-step armed */
+        /*
+         * pc at the moment mon_stepping was armed -- see the comment on
+         * its use in armv7m_debug_excp_handler() (target/arm/tcg/
+         * m_helper.c), which needs it to detect a spurious immediate
+         * catch (the arming instruction's own completion, not the
+         * resumed context's first real instruction).
+         */
+        uint32_t mon_step_from_pc;
     } v7m;
 
     /* Information associated with an exception about to be taken:
