@@ -39,10 +39,12 @@
 #define CR_SER   (1u << 2)
 #define CR_BER   (1u << 3)
 #define CR_START (1u << 7)
-#define CR_SNB(n) ((uint32_t)(n) << 11)
+#define CR_SNB(n) ((uint32_t)(n) << 8)
+#define CR_EOPIE     (1u << 16)
+#define CR_WRPERRIE  (1u << 17)
 
-#define SR_EOP     (1u << 4)
-#define SR_WRPERR  (1u << 5)
+#define SR_EOP     (1u << 16)
+#define SR_WRPERR  (1u << 17)
 
 #define OPTCR_OPTLOCK  (1u << 0)
 #define OPTCR_OPTSTART (1u << 1)
@@ -50,6 +52,27 @@
 #define FLASH_BANK1_BASE 0x08000000
 #define FLASH_BANK2_BASE 0x08100000
 #define FLASH_SECTOR_SIZE (128 * 1024)
+
+/* NVIC_IRQn 4: FLASH global interrupt (hw/arm/stm32h7_soc.c FLASH_IRQ) */
+#define FLASH_IRQ 4
+#define NVIC_ISPR 0xe000e200
+#define NVIC_ICPR 0xe000e280
+
+static bool check_nvic_pending(QTestState *qts, unsigned int n)
+{
+    return qtest_readl(qts, NVIC_ISPR) & (1u << n);
+}
+
+/*
+ * NVIC pending is a level-triggered latch: once set it persists until
+ * explicitly cleared here, even after the peripheral's IRQ line has gone
+ * back low -- deasserting the source alone (e.g. clearing SR via CCR)
+ * does not auto-clear it.
+ */
+static void unpend_nvic_irq(QTestState *qts, unsigned int n)
+{
+    qtest_writel(qts, NVIC_ICPR, 1u << n);
+}
 
 /*
  * A trivial bare-metal "vector table + spin loop" payload, identical in
@@ -260,6 +283,87 @@ static void test_flash_bank2_addressing(void)
     qtest_quit(qts);
 }
 
+static void test_flash_irq_eop(void)
+{
+    QTestState *qts = start_idle();
+
+    g_assert_false(check_nvic_pending(qts, FLASH_IRQ));
+
+    unlock_bank(qts, FLASH_KEYR1);
+    qtest_writel(qts, FLASH_CR1, CR_PG | CR_EOPIE);
+    qtest_writel(qts, FLASH_BANK1_BASE, 0x12345678);
+
+    qtest_writel(qts, FLASH_CR1, CR_EOPIE | CR_SER | CR_START | CR_SNB(0));
+    g_assert_cmpuint(qtest_readl(qts, FLASH_SR1) & SR_EOP, !=, 0);
+    g_assert_true(check_nvic_pending(qts, FLASH_IRQ));
+
+    /*
+     * Clearing SR.EOP drops the source line, but NVIC pending stays
+     * latched until explicitly unpended -- standard ARMv7-M behavior.
+     */
+    qtest_writel(qts, FLASH_CCR1, SR_EOP);
+    g_assert_true(check_nvic_pending(qts, FLASH_IRQ));
+    unpend_nvic_irq(qts, FLASH_IRQ);
+    g_assert_false(check_nvic_pending(qts, FLASH_IRQ));
+
+    qtest_quit(qts);
+}
+
+static void test_flash_irq_error(void)
+{
+    QTestState *qts = start_idle();
+
+    unlock_opt(qts);
+    qtest_writel(qts, FLASH_WPSN_PRG1R, 0xfe);
+    qtest_writel(qts, FLASH_OPTCR, OPTCR_OPTSTART);
+
+    unlock_bank(qts, FLASH_KEYR1);
+    qtest_writel(qts, FLASH_CR1, CR_WRPERRIE);
+
+    g_assert_false(check_nvic_pending(qts, FLASH_IRQ));
+    qtest_writel(qts, FLASH_CR1, CR_WRPERRIE | CR_SER | CR_START | CR_SNB(0));
+    g_assert_cmpuint(qtest_readl(qts, FLASH_SR1) & SR_WRPERR, !=, 0);
+    g_assert_true(check_nvic_pending(qts, FLASH_IRQ));
+
+    qtest_writel(qts, FLASH_CCR1, SR_WRPERR);
+    unpend_nvic_irq(qts, FLASH_IRQ);
+    g_assert_false(check_nvic_pending(qts, FLASH_IRQ));
+
+    qtest_quit(qts);
+}
+
+static void test_flash_irq_masked(void)
+{
+    QTestState *qts = start_idle();
+
+    unlock_bank(qts, FLASH_KEYR1);
+    qtest_writel(qts, FLASH_CR1, CR_PG);
+    qtest_writel(qts, FLASH_BANK1_BASE, 0x12345678);
+
+    /* EOPIE left clear: SR.EOP sets, but the shared IRQ stays deasserted */
+    qtest_writel(qts, FLASH_CR1, CR_SER | CR_START | CR_SNB(0));
+    g_assert_cmpuint(qtest_readl(qts, FLASH_SR1) & SR_EOP, !=, 0);
+    g_assert_false(check_nvic_pending(qts, FLASH_IRQ));
+
+    qtest_quit(qts);
+}
+
+static void test_flash_irq_bank_independent_source(void)
+{
+    QTestState *qts = start_idle();
+
+    unlock_bank(qts, FLASH_KEYR2);
+    qtest_writel(qts, FLASH_CR2, CR_PG | CR_EOPIE);
+    qtest_writel(qts, FLASH_BANK2_BASE, 0xdeadbeef);
+
+    g_assert_false(check_nvic_pending(qts, FLASH_IRQ));
+    qtest_writel(qts, FLASH_CR2, CR_EOPIE | CR_SER | CR_START | CR_SNB(0));
+    g_assert_cmpuint(qtest_readl(qts, FLASH_SR2) & SR_EOP, !=, 0);
+    g_assert_true(check_nvic_pending(qts, FLASH_IRQ));
+
+    qtest_quit(qts);
+}
+
 int main(int argc, char **argv)
 {
     g_test_init(&argc, &argv, NULL);
@@ -276,6 +380,11 @@ int main(int argc, char **argv)
                    test_flash_write_protect);
     qtest_add_func("/stm32h743-eval/flash/bank2-addressing",
                    test_flash_bank2_addressing);
+    qtest_add_func("/stm32h743-eval/flash/irq-eop", test_flash_irq_eop);
+    qtest_add_func("/stm32h743-eval/flash/irq-error", test_flash_irq_error);
+    qtest_add_func("/stm32h743-eval/flash/irq-masked", test_flash_irq_masked);
+    qtest_add_func("/stm32h743-eval/flash/irq-bank-independent-source",
+                   test_flash_irq_bank_independent_source);
 
     return g_test_run();
 }

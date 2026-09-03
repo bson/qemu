@@ -16,6 +16,7 @@
 #include "qapi/error.h"
 #include "hw/misc/stm32h7_flash.h"
 #include "hw/core/registerfields.h"
+#include "hw/core/irq.h"
 #include "qemu/log.h"
 
 /*
@@ -35,18 +36,31 @@ REG32(FLASH_CR, 0x0c)
     FIELD(FLASH_CR, PSIZE, 4, 2)
     FIELD(FLASH_CR, FW, 6, 1)
     FIELD(FLASH_CR, START, 7, 1)
-    FIELD(FLASH_CR, SNB, 11, 5)
+    FIELD(FLASH_CR, SNB, 8, 3)
+    /*
+     * Interrupt-enable bits share the exact bit positions of their
+     * FLASH_SR status-bit counterparts below -- real RM0433 layout, not a
+     * simplification -- so a plain "SR & CR" is the pending-interrupt mask.
+     */
+    FIELD(FLASH_CR, EOPIE, 16, 1)
+    FIELD(FLASH_CR, WRPERRIE, 17, 1)
+    FIELD(FLASH_CR, PGSERRIE, 18, 1)
+    FIELD(FLASH_CR, STRBERRIE, 19, 1)
+    FIELD(FLASH_CR, INCERRIE, 21, 1)
+    FIELD(FLASH_CR, OPERRIE, 22, 1)
+    FIELD(FLASH_CR, RDPERRIE, 23, 1)
+    FIELD(FLASH_CR, RDSERRIE, 24, 1)
 REG32(FLASH_SR, 0x10)
     FIELD(FLASH_SR, BSY, 0, 1)
     FIELD(FLASH_SR, QW, 2, 1)
-    FIELD(FLASH_SR, EOP, 4, 1)
-    FIELD(FLASH_SR, WRPERR, 5, 1)
-    FIELD(FLASH_SR, PGSERR, 6, 1)
-    FIELD(FLASH_SR, STRBERR, 7, 1)
-    FIELD(FLASH_SR, INCERR, 9, 1)
-    FIELD(FLASH_SR, OPERR, 10, 1)
-    FIELD(FLASH_SR, RDPERR, 11, 1)
-    FIELD(FLASH_SR, RDSERR, 12, 1)
+    FIELD(FLASH_SR, EOP, 16, 1)
+    FIELD(FLASH_SR, WRPERR, 17, 1)
+    FIELD(FLASH_SR, PGSERR, 18, 1)
+    FIELD(FLASH_SR, STRBERR, 19, 1)
+    FIELD(FLASH_SR, INCERR, 21, 1)
+    FIELD(FLASH_SR, OPERR, 22, 1)
+    FIELD(FLASH_SR, RDPERR, 23, 1)
+    FIELD(FLASH_SR, RDSERR, 24, 1)
 REG32(FLASH_CCR, 0x14)
 REG32(FLASH_OPTCR, 0x18)
     FIELD(FLASH_OPTCR, OPTLOCK, 0, 1)
@@ -67,6 +81,13 @@ REG32(FLASH_WPSN_PRG, 0x3c)
      R_FLASH_SR_STRBERR_MASK | R_FLASH_SR_INCERR_MASK | \
      R_FLASH_SR_OPERR_MASK | R_FLASH_SR_RDPERR_MASK | R_FLASH_SR_RDSERR_MASK)
 
+/*
+ * CR interrupt-enable bits, at the same bit positions as their SR
+ * counterparts (real RM0433 layout) -- so "SR & CR & this mask" is
+ * directly the set of currently-interrupting conditions.
+ */
+#define FLASH_CR_IE_MASK FLASH_SR_CLEARABLE_MASK
+
 #define FLASH_KEY1 0x45670123
 #define FLASH_KEY2 0xcdef89ab
 #define FLASH_OPTKEY1 0x08192a3b
@@ -79,6 +100,22 @@ MemoryRegion *stm32h7_flash_get_bank(Stm32h7FlashState *s, unsigned slot)
     unsigned n = s->swap_bank ? !slot : slot;
 
     return &s->bank_ram[n];
+}
+
+/*
+ * Real silicon has a single shared FLASH_IRQn covering both banks, so the
+ * line reflects the OR of both banks' currently-interrupting conditions.
+ */
+static void stm32h7_flash_update_irq(Stm32h7FlashState *s)
+{
+    uint32_t pending = 0;
+    unsigned n;
+
+    for (n = 0; n < STM32H7_FLASH_NUM_BANKS; n++) {
+        pending |= s->sr[n] & s->cr[n] & FLASH_CR_IE_MASK;
+    }
+
+    qemu_set_irq(s->irq, pending != 0);
 }
 
 static void flash_erase_sector(Stm32h7FlashState *s, unsigned n, unsigned snb)
@@ -128,7 +165,7 @@ static void flash_cr_write(Stm32h7FlashState *s, unsigned n, uint32_t value)
     s->cr[n] = value & (R_FLASH_CR_LOCK_MASK | R_FLASH_CR_PG_MASK |
                         R_FLASH_CR_SER_MASK | R_FLASH_CR_BER_MASK |
                         R_FLASH_CR_PSIZE_MASK | R_FLASH_CR_FW_MASK |
-                        R_FLASH_CR_SNB_MASK);
+                        R_FLASH_CR_SNB_MASK | FLASH_CR_IE_MASK);
 
     if (value & R_FLASH_CR_START_MASK) {
         unsigned snb = (s->cr[n] & R_FLASH_CR_SNB_MASK) >>
@@ -140,6 +177,12 @@ static void flash_cr_write(Stm32h7FlashState *s, unsigned n, uint32_t value)
             flash_erase_sector(s, n, snb);
         }
     }
+
+    /*
+     * Covers both a new EOP/error status from the erase above and an IE
+     * bit toggle unmasking/masking an already-pending condition.
+     */
+    stm32h7_flash_update_irq(s);
 }
 
 static void flash_keyr_write(Stm32h7FlashState *s, unsigned n, uint32_t value)
@@ -284,6 +327,7 @@ static MemTxResult stm32h7_flash_write(void *opaque, hwaddr addr,
             return MEMTX_OK;
         case A_FLASH_CCR:
             s->sr[n] &= ~(value & FLASH_SR_CLEARABLE_MASK);
+            stm32h7_flash_update_irq(s);
             return MEMTX_OK;
         case A_FLASH_WPSN_PRG:
             s->wpsn_prg[n] = value & 0xff;
@@ -328,6 +372,8 @@ static void stm32h7_flash_reset_hold(Object *obj, ResetType type)
         s->sr[n] = 0;
         s->key_state[n] = 0;
     }
+
+    stm32h7_flash_update_irq(s);
 }
 
 static void stm32h7_flash_init(Object *obj)
@@ -339,6 +385,7 @@ static void stm32h7_flash_init(Object *obj)
     memory_region_init_io(&s->iomem, obj, &stm32h7_flash_ops,
                           s, "stm32h7-flash", 0x400);
     sysbus_init_mmio(sbd, &s->iomem);
+    sysbus_init_irq(sbd, &s->irq);
 
     s->optsr_cur = 0;
     s->optsr_prg = 0;

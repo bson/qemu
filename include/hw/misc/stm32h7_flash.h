@@ -19,16 +19,14 @@
  *
  * Modeled: per-bank KEYR unlock sequence gating CR.LOCK, PG/SER/BER
  * program and erase, SR/CCR status bookkeeping, per-sector write
- * protection (WPSN), and bank swapping (OPTCR.SWAP_BANK).
+ * protection (WPSN), bank swapping (OPTCR.SWAP_BANK), and the per-bank
+ * CR interrupt-enable bits driving the single shared FLASH_IRQn line.
  *
  * Deliberately not modeled: read protection (RDP) enforcement, ECC,
- * ICACHE/DCACHE/ART interaction, the CRC engine, PCROP/secure-area
- * registers, and FLASH_IRQn interrupt generation (guest firmware is
- * expected to poll BSY/QW/EOP, as this codebase's other debug-hardware
- * models already assume no interrupt-driven completion is needed).
- * Program/erase operations complete synchronously within the register
- * write that triggers them -- no operation-latency timer is modeled,
- * matching every other register-gated device in this SoC.
+ * ICACHE/DCACHE/ART interaction, and the CRC engine/PCROP/secure-area
+ * registers. Program/erase operations complete synchronously within the
+ * register write that triggers them -- no operation-latency timer is
+ * modeled, matching every other register-gated device in this SoC.
  *
  * Direct guest stores into the mapped bank MemoryRegions succeed
  * regardless of CR.PG, since QEMU's plain RAM regions can't cheaply fault
@@ -38,6 +36,8 @@
  *
  * QEMU interface:
  *  + sysbus MMIO region 0: the register bank at 0x52002000
+ *  + sysbus IRQ 0: FLASH_IRQn, the single interrupt line shared by both
+ *    banks (real silicon has no per-bank FLASH interrupt)
  *  + stm32h7_flash_get_bank(): the RAM MemoryRegion currently mapped for
  *    a given logical bank (0 or 1), for the SoC to subregion into the
  *    system address space
@@ -65,6 +65,7 @@ struct Stm32h7FlashState {
     /*< public >*/
     MemoryRegion iomem;
     MemoryRegion bank_ram[STM32H7_FLASH_NUM_BANKS];
+    qemu_irq irq;
 
     uint32_t acr;
     uint32_t cr[STM32H7_FLASH_NUM_BANKS];

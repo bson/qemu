@@ -56,6 +56,9 @@
 #define USART1_BASE_ADDRESS 0x40011000
 #define USART1_IRQ 37
 
+/* FLASH global interrupt; stable across the F4/F7/H7 lineage's vector table */
+#define FLASH_IRQ 4
+
 /*
  * TIM2, at its real STM32H7 address/IRQ -- stable across the whole
  * F2/F4/F7/H7 lineage sharing this general-purpose timer IP. The only
@@ -234,6 +237,8 @@ static void stm32h7_soc_realize(DeviceState *dev_soc, Error **errp)
     memory_region_add_subregion(system_memory,
                                 FLASH_BASE_ADDRESS + STM32H7_FLASH_BANK_SIZE,
                                 stm32h7_flash_get_bank(&s->flash_ctrl, 1));
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->flash_ctrl), 0,
+                       qdev_get_gpio_in(armv7m, FLASH_IRQ));
 
     /*
      * Debug MCU ID and the factory unique ID: real, always-present
