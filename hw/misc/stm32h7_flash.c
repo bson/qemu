@@ -51,9 +51,13 @@ REG32(FLASH_CCR, 0x14)
 REG32(FLASH_OPTCR, 0x18)
     FIELD(FLASH_OPTCR, OPTLOCK, 0, 1)
     FIELD(FLASH_OPTCR, OPTSTART, 1, 1)
-    FIELD(FLASH_OPTCR, SWAP_BANK, 31, 1)
 REG32(FLASH_OPTSR_CUR, 0x1c)
 REG32(FLASH_OPTSR_PRG, 0x20)
+    /* Same bit position in both OPTSR_CUR and OPTSR_PRG; RM0433 has no
+     * SWAP_BANK field in OPTCR itself -- it's staged in OPTSR_PRG and
+     * committed to OPTSR_CUR by OPTCR.OPTSTART, like every other option
+     * byte. */
+    FIELD(FLASH_OPTSR_PRG, SWAP_BANK_OPT, 31, 1)
 REG32(FLASH_WPSN_CUR, 0x38)
 REG32(FLASH_WPSN_PRG, 0x3c)
 
@@ -177,8 +181,7 @@ static void flash_optcr_write(Stm32h7FlashState *s, uint32_t value)
         return;
     }
 
-    s->optcr = (value & (R_FLASH_OPTCR_OPTLOCK_MASK |
-                         R_FLASH_OPTCR_SWAP_BANK_MASK)) |
+    s->optcr = (value & R_FLASH_OPTCR_OPTLOCK_MASK) |
                (s->optcr & R_FLASH_OPTCR_OPTSTART_MASK & 0);
 
     if (value & R_FLASH_OPTCR_OPTSTART_MASK) {
@@ -186,7 +189,7 @@ static void flash_optcr_write(Stm32h7FlashState *s, uint32_t value)
         s->optsr_cur = s->optsr_prg;
         s->wpsn_cur[0] = s->wpsn_prg[0];
         s->wpsn_cur[1] = s->wpsn_prg[1];
-        s->swap_bank = !!(s->optcr & R_FLASH_OPTCR_SWAP_BANK_MASK);
+        s->swap_bank = !!(s->optsr_cur & R_FLASH_OPTSR_PRG_SWAP_BANK_OPT_MASK);
     }
 }
 
@@ -300,6 +303,17 @@ static const MemoryRegionOps stm32h7_flash_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
+/*
+ * Only the volatile control/status registers reset here -- optsr_cur/
+ * optsr_prg/swap_bank/wpsn_cur/wpsn_prg are option bytes, backed by
+ * flash the same way bank_ram[] is: on real silicon they survive an
+ * ordinary system reset (that's the entire point of "monitor swap"
+ * ending in a reset rather than taking effect immediately -- see
+ * gdbserver's monitor_swap()), and this reset_hold runs on every system
+ * reset, not just cold power-up. They're given their power-up default
+ * (option bytes erased, bank 0 active) once, in stm32h7_flash_init()
+ * below, instead.
+ */
 static void stm32h7_flash_reset_hold(Object *obj, ResetType type)
 {
     Stm32h7FlashState *s = STM32H7_FLASH(obj);
@@ -307,18 +321,12 @@ static void stm32h7_flash_reset_hold(Object *obj, ResetType type)
 
     s->acr = 0;
     s->optcr = R_FLASH_OPTCR_OPTLOCK_MASK;
-    s->optsr_cur = 0;
-    s->optsr_prg = 0;
     s->optkey_state = 0;
-    s->swap_bank = false;
 
     for (n = 0; n < STM32H7_FLASH_NUM_BANKS; n++) {
         s->cr[n] = R_FLASH_CR_LOCK_MASK;
         s->sr[n] = 0;
         s->key_state[n] = 0;
-        /* 0xff: no sectors write-protected, matching erased option bytes */
-        s->wpsn_cur[n] = 0xff;
-        s->wpsn_prg[n] = 0xff;
     }
 }
 
@@ -332,11 +340,19 @@ static void stm32h7_flash_init(Object *obj)
                           s, "stm32h7-flash", 0x400);
     sysbus_init_mmio(sbd, &s->iomem);
 
+    s->optsr_cur = 0;
+    s->optsr_prg = 0;
+    s->swap_bank = false;
+
     for (n = 0; n < STM32H7_FLASH_NUM_BANKS; n++) {
         g_autofree char *name = g_strdup_printf("stm32h7-flash-bank%u", n);
 
         memory_region_init_ram(&s->bank_ram[n], obj, name,
                                STM32H7_FLASH_BANK_SIZE, &error_abort);
+
+        /* 0xff: no sectors write-protected, matching erased option bytes */
+        s->wpsn_cur[n] = 0xff;
+        s->wpsn_prg[n] = 0xff;
     }
 }
 
