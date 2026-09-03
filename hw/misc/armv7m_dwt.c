@@ -42,6 +42,7 @@ REG32(DWT_FUNCTION0, 0x28)
 static void dwt_update_wp(ARMv7mDWTState *s, unsigned n)
 {
     int flags;
+    vaddr len, addr;
 
     if (s->wp[n]) {
         cpu_watchpoint_remove_by_ref(CPU(s->cpu), s->wp[n]);
@@ -62,12 +63,9 @@ static void dwt_update_wp(ARMv7mDWTState *s, unsigned n)
         return;
     }
 
-    {
-        vaddr len = 1ULL << FIELD_EX32(s->mask[n], DWT_MASKn, MASK);
-        vaddr addr = s->comp[n] & ~(len - 1);
-
-        cpu_watchpoint_insert(CPU(s->cpu), addr, len, flags, &s->wp[n]);
-    }
+    len = 1ULL << FIELD_EX32(s->mask[n], DWT_MASKn, MASK);
+    addr = s->comp[n] & ~(len - 1);
+    cpu_watchpoint_insert(CPU(s->cpu), addr, len, flags, &s->wp[n]);
 }
 
 static MemTxResult dwt_read(void *opaque, hwaddr addr,

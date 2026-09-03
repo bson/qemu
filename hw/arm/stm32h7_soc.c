@@ -95,54 +95,39 @@ static void stm32h7_soc_realize(DeviceState *dev_soc, Error **errp)
     s->sysclk = clock_new(OBJECT(dev_soc), "SYSCLK");
     clock_set_hz(s->sysclk, SYSCLK_FRQ);
 
-    if (!memory_region_init_ram(&s->itcm, OBJECT(dev_soc), "ITCM-RAM",
-                                ITCM_RAM_SIZE, errp)) {
-        return;
-    }
-    memory_region_add_subregion(system_memory, ITCM_RAM_BASE, &s->itcm);
+    static const struct {
+        const char *name;
+        hwaddr base;
+        size_t size;
+        size_t offset;
+    } ram_region[] = {
+        { "ITCM-RAM",    ITCM_RAM_BASE,        ITCM_RAM_SIZE,
+          offsetof(Stm32h7SocState, itcm) },
+        { "DTCM-RAM",    DTCM_RAM_BASE,        DTCM_RAM_SIZE,
+          offsetof(Stm32h7SocState, dtcm) },
+        { "AXI-SRAM",    AXI_SRAM_BASE,        AXI_SRAM_SIZE,
+          offsetof(Stm32h7SocState, axi_sram) },
+        { "SRAM1",       SRAM1_BASE_ADDRESS,   SRAM1_SIZE,
+          offsetof(Stm32h7SocState, sram1) },
+        { "SRAM2",       SRAM2_BASE_ADDRESS,   SRAM2_SIZE,
+          offsetof(Stm32h7SocState, sram2) },
+        { "SRAM3",       SRAM3_BASE_ADDRESS,   SRAM3_SIZE,
+          offsetof(Stm32h7SocState, sram3) },
+        { "SRAM4",       SRAM4_BASE_ADDRESS,   SRAM4_SIZE,
+          offsetof(Stm32h7SocState, sram4) },
+        { "Backup-SRAM", BACKUP_SRAM_BASE,     BACKUP_SRAM_SIZE,
+          offsetof(Stm32h7SocState, backup_sram) },
+    };
 
-    if (!memory_region_init_ram(&s->dtcm, OBJECT(dev_soc), "DTCM-RAM",
-                                DTCM_RAM_SIZE, errp)) {
-        return;
-    }
-    memory_region_add_subregion(system_memory, DTCM_RAM_BASE, &s->dtcm);
+    for (unsigned i = 0; i < ARRAY_SIZE(ram_region); i++) {
+        MemoryRegion *mr = (MemoryRegion *)((char *)s + ram_region[i].offset);
 
-    if (!memory_region_init_ram(&s->axi_sram, OBJECT(dev_soc), "AXI-SRAM",
-                                AXI_SRAM_SIZE, errp)) {
-        return;
+        if (!memory_region_init_ram(mr, OBJECT(dev_soc), ram_region[i].name,
+                                    ram_region[i].size, errp)) {
+            return;
+        }
+        memory_region_add_subregion(system_memory, ram_region[i].base, mr);
     }
-    memory_region_add_subregion(system_memory, AXI_SRAM_BASE, &s->axi_sram);
-
-    if (!memory_region_init_ram(&s->sram1, OBJECT(dev_soc), "SRAM1",
-                                SRAM1_SIZE, errp)) {
-        return;
-    }
-    memory_region_add_subregion(system_memory, SRAM1_BASE_ADDRESS, &s->sram1);
-
-    if (!memory_region_init_ram(&s->sram2, OBJECT(dev_soc), "SRAM2",
-                                SRAM2_SIZE, errp)) {
-        return;
-    }
-    memory_region_add_subregion(system_memory, SRAM2_BASE_ADDRESS, &s->sram2);
-
-    if (!memory_region_init_ram(&s->sram3, OBJECT(dev_soc), "SRAM3",
-                                SRAM3_SIZE, errp)) {
-        return;
-    }
-    memory_region_add_subregion(system_memory, SRAM3_BASE_ADDRESS, &s->sram3);
-
-    if (!memory_region_init_ram(&s->sram4, OBJECT(dev_soc), "SRAM4",
-                                SRAM4_SIZE, errp)) {
-        return;
-    }
-    memory_region_add_subregion(system_memory, SRAM4_BASE_ADDRESS, &s->sram4);
-
-    if (!memory_region_init_ram(&s->backup_sram, OBJECT(dev_soc),
-                                "Backup-SRAM", BACKUP_SRAM_SIZE, errp)) {
-        return;
-    }
-    memory_region_add_subregion(system_memory, BACKUP_SRAM_BASE,
-                                &s->backup_sram);
 
     /* Cortex-M7 core + NVIC */
     object_initialize_child(OBJECT(dev_soc), "armv7m", &s->armv7m,

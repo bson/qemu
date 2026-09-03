@@ -140,7 +140,6 @@ static void flash_erase_sector(Stm32h7FlashState *s, unsigned n, unsigned snb)
 static void flash_erase_bank(Stm32h7FlashState *s, unsigned n)
 {
     void *ram;
-    unsigned snb;
 
     if (s->wpsn_cur[n] != 0xff) {
         s->sr[n] |= R_FLASH_SR_WRPERR_MASK;
@@ -149,9 +148,6 @@ static void flash_erase_bank(Stm32h7FlashState *s, unsigned n)
 
     ram = memory_region_get_ram_ptr(&s->bank_ram[n]);
     memset(ram, 0xff, STM32H7_FLASH_BANK_SIZE);
-    for (snb = 0; snb < STM32H7_FLASH_SECTORS_PER_BANK; snb++) {
-        /* nothing left to protect-check: whole-bank WP already verified */
-    }
     s->sr[n] |= R_FLASH_SR_EOP_MASK;
 }
 
@@ -224,8 +220,8 @@ static void flash_optcr_write(Stm32h7FlashState *s, uint32_t value)
         return;
     }
 
-    s->optcr = (value & R_FLASH_OPTCR_OPTLOCK_MASK) |
-               (s->optcr & R_FLASH_OPTCR_OPTSTART_MASK & 0);
+    /* OPTSTART is a strobe, not stored back */
+    s->optcr = value & R_FLASH_OPTCR_OPTLOCK_MASK;
 
     if (value & R_FLASH_OPTCR_OPTSTART_MASK) {
         /* Option-byte "programming" is immediate: commit PRG to CUR */
