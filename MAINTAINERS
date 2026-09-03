@@ -1114,6 +1114,9 @@ S: Maintained
 F: hw/arm/stm32h7_soc.c
 F: hw/arm/stm32h743-eval.c
 F: include/hw/arm/stm32h7_soc.h
+F: hw/misc/stm32h7_flash.c
+F: include/hw/misc/stm32h7_flash.h
+F: tests/qtest/stm32h743-eval-flash*
 
 STM32VLDISCOVERY
 M: Alexandre Iooss <erdnaxe@crans.org>

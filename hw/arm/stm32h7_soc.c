@@ -84,7 +84,6 @@ static void stm32h7_soc_initfn(Object *obj)
 static void stm32h7_soc_realize(DeviceState *dev_soc, Error **errp)
 {
     Stm32h7SocState *s = STM32H7_SOC(dev_soc);
-    const Stm32h7SocClass *sc = STM32H7_SOC_GET_CLASS(dev_soc);
     MemoryRegion *system_memory = get_system_memory();
     DeviceState *armv7m, *dev;
     SysBusDevice *busdev;
@@ -92,12 +91,6 @@ static void stm32h7_soc_realize(DeviceState *dev_soc, Error **errp)
     /* This clock doesn't need migration because it is fixed-frequency */
     s->sysclk = clock_new(OBJECT(dev_soc), "SYSCLK");
     clock_set_hz(s->sysclk, SYSCLK_FRQ);
-
-    if (!memory_region_init_rom(&s->flash, OBJECT(dev_soc), "flash",
-                                sc->flash_size, errp)) {
-        return;
-    }
-    memory_region_add_subregion(system_memory, FLASH_BASE_ADDRESS, &s->flash);
 
     if (!memory_region_init_ram(&s->itcm, OBJECT(dev_soc), "ITCM-RAM",
                                 ITCM_RAM_SIZE, errp)) {
@@ -225,18 +218,34 @@ static void stm32h7_soc_realize(DeviceState *dev_soc, Error **errp)
     create_unimplemented_device("UART8",  0x40007C00, 0x400);
 
     /*
-     * Flash controller registers, debug MCU ID, and the factory unique
-     * ID: real, always-present peripherals on actual STM32H7 silicon,
-     * not board-specific wiring like the GPIO/UART stubs above. Guest
-     * firmware (e.g. gdbserver's own HAL) can reasonably read these
-     * unconditionally at boot expecting them to always be there, same
-     * as on real hardware -- stubbing them here (rather than leaving
-     * this range genuinely unmapped) lets the machine raise a real
-     * BusFault for addresses nothing on this SoC actually claims,
-     * instead of needing ignore_memory_transaction_failures as a
-     * blanket safety net.
+     * Dual-bank flash controller: real registers plus the two banks'
+     * guest-writable backing storage (see hw/misc/stm32h7_flash.c). A
+     * -kernel image is loaded into bank 1 below, after this device is
+     * realized and its bank regions are mapped.
      */
-    create_unimplemented_device("FLASH",  0x52002000, 0x400);
+    object_initialize_child(OBJECT(dev_soc), "flash-ctrl", &s->flash_ctrl,
+                            TYPE_STM32H7_FLASH);
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->flash_ctrl), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->flash_ctrl), 0, 0x52002000);
+    memory_region_add_subregion(system_memory, FLASH_BASE_ADDRESS,
+                                stm32h7_flash_get_bank(&s->flash_ctrl, 0));
+    memory_region_add_subregion(system_memory,
+                                FLASH_BASE_ADDRESS + STM32H7_FLASH_BANK_SIZE,
+                                stm32h7_flash_get_bank(&s->flash_ctrl, 1));
+
+    /*
+     * Debug MCU ID and the factory unique ID: real, always-present
+     * peripherals on actual STM32H7 silicon, not board-specific wiring
+     * like the GPIO/UART stubs above. Guest firmware (e.g. gdbserver's
+     * own HAL) can reasonably read these unconditionally at boot
+     * expecting them to always be there, same as on real hardware --
+     * stubbing them here (rather than leaving this range genuinely
+     * unmapped) lets the machine raise a real BusFault for addresses
+     * nothing on this SoC actually claims, instead of needing
+     * ignore_memory_transaction_failures as a blanket safety net.
+     */
     create_unimplemented_device("DBGMCU", 0x5c001000, 0x400);
     create_unimplemented_device("UID",    0x1ff1e800, 0x20);
 }

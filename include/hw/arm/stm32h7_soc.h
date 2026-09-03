@@ -23,6 +23,7 @@
 #include "hw/arm/armv7m.h"
 #include "hw/char/stm32l4x5_usart.h"
 #include "hw/timer/stm32f2xx_timer.h"
+#include "hw/misc/stm32h7_flash.h"
 #include "qom/object.h"
 
 #define TYPE_STM32H7_SOC "stm32h7-soc"
@@ -47,7 +48,7 @@ struct Stm32h7SocState {
     MemoryRegion sram3;
     MemoryRegion sram4;
     MemoryRegion backup_sram;
-    MemoryRegion flash;
+    Stm32h7FlashState flash_ctrl;
 };
 
 struct Stm32h7SocClass {
